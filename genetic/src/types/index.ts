@@ -20,7 +20,7 @@ export interface Class {
   id: string;
   name: string;
   subjects: string[];
-  labs: string[]; // Changed from { subjectId: string; duration: number }[] to string[]
+  labs: { subjectId: string; duration: number }[];
 }
 
 export interface TimeSlot {
@@ -37,5 +37,4 @@ export interface Timetable {
 
 export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 export const PERIODS_PER_DAY = 8;
-export const LAB_DURATION = 2; // New constant for lab duration
 

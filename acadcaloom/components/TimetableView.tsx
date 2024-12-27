@@ -55,7 +55,7 @@ export default function TimetableView({
 
   // Update getTeacherSchedule to include lab information
   const getTeacherSchedule = (teacher_id: string) => {
-    const schedule: { [key: string]: { className: string; subjectName: string; roomInfo: any; is_lab: boolean }[] } = {};
+    const schedule: { [key: string]: { className: string; subjectName: string; roomInfo: any; is_lab: boolean,isInterval: boolean }[] } = {};
     
     DAYS.forEach(day => {
       schedule[day] = Array(PERIODS_PER_DAY).fill(null);

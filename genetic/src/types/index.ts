@@ -20,31 +20,14 @@ export interface Class {
   id: string;
   name: string;
   subjects: string[];
-  labs: { subject_id: string; duration: number }[];
-  room_id: string; 
-  user_id: string;
-  created_at?: string;
-}
-export interface Room {
-  id: string;
-  name: string;
-  capacity: number;
-  type: 'classroom' | 'lab' | 'lecture_hall';
-  building: string;
-  floor: number;
-  availability?: {
-    [day: string]: { start: number; end: number } | null;
-  };
+  labs: { subjectId: string; duration: number }[];
 }
 
-// Update TimeSlot interface
 export interface TimeSlot {
   day: string;
   period: number;
-  subject_id: string | null;
-  room_id: string | null; // Add room allocation
-  is_lab: boolean;
-  is_interval?: boolean;
+  subjectId: string | null;
+  isLab: boolean;
 }
 
 export interface Timetable {
@@ -54,5 +37,4 @@ export interface Timetable {
 
 export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 export const PERIODS_PER_DAY = 8;
-export const LAB_DURATION = 2; // New constant for lab duration
 

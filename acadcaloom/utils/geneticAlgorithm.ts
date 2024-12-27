@@ -51,67 +51,61 @@ function calculateFitness(
   let fitness = 0;
 
   // Check for teacher conflicts
-  const teacherSlots: { [teacher_id: string]: Set<string> } = {};
+  const teacherSlots: { [teacherId: string]: Set<string> } = {};
   timetable.slots.forEach((slot) => {
-    if (slot.subject_id) {
-      const subject = subjects.find(s => s.id === slot.subject_id);
+    if (slot.subjectId) {
+      const subject = subjects.find(s => s.id === slot.subjectId);
       if (subject) {
-        const teacher_id = subject.teacher_id; // Fixed: using snake_case
-        if (!teacherSlots[teacher_id]) {
-          teacherSlots[teacher_id] = new Set();
+        const teacherId = subject.teacherId;
+        if (!teacherSlots[teacherId]) {
+          teacherSlots[teacherId] = new Set();
         }
         const slotKey = `${slot.day}-${slot.period}`;
-        if (teacherSlots[teacher_id].has(slotKey)) {
+        if (teacherSlots[teacherId].has(slotKey)) {
           fitness -= 10; // Penalize teacher conflicts
         } else {
-          teacherSlots[teacher_id].add(slotKey);
+          teacherSlots[teacherId].add(slotKey);
         }
       }
     }
   });
 
-  // Check for continuous subjects
-  let continuousSubjects = 0;
-  for (let i = 1; i < timetable.slots.length; i++) {
-    if (timetable.slots[i].subject_id === timetable.slots[i - 1].subject_id) {
-      continuousSubjects++;
-      if (continuousSubjects > 2) {
-        fitness -= 5; // Penalize more than 2 continuous subjects
+  // Check for lab sessions
+  const labSlots: { [key: string]: string } = {};
+  for (let i = 0; i < timetable.slots.length - 1; i++) {
+    const slot = timetable.slots[i];
+    const nextSlot = timetable.slots[i + 1];
+    if (slot.isInterval || nextSlot.isInterval) continue;
+    if (slot.isLab) {
+      const labKey = `${slot.day}-${slot.period}`;
+      if (labSlots[labKey]) {
+        fitness -= 30; // Heavily penalize lab clashes between classes
+      } else {
+        labSlots[labKey] = timetable.classId;
       }
-    } else {
-      continuousSubjects = 0;
+
+      if (slot.day === nextSlot.day && nextSlot.period === slot.period + 1 && slot.subjectId === nextSlot.subjectId && nextSlot.isLab) {
+        fitness += 10; // Reward correct lab placement
+      } else {
+        fitness -= 15; // Penalize incorrect lab duration or placement
+      }
+
+      if (![0, 2, 4, 6].includes(slot.period)) {
+        fitness -= 20; // Penalize incorrect lab start time
+      }
     }
   }
 
   // Check for teacher constraints
   timetable.slots.forEach((slot) => {
-    if (slot.subject_id) {
-      const subject = subjects.find(s => s.id === slot.subject_id);
+    if (slot.subjectId) {
+      const subject = subjects.find(s => s.id === slot.subjectId);
       if (subject) {
-        const teacher = teachers.find((t) => t.id === subject.teacher_id); // Fixed: using snake_case
-        if (teacher && teacher.constraints && teacher.constraints[slot.day]) {
-          const constraint = teacher.constraints[slot.day];
-          if (constraint) {
-            const { start, end } = constraint;
-            if (slot.period < start || slot.period > end) {
-              fitness -= 10; // Penalize violating teacher constraints
-            }
-          }
-        }
-      }
-    }
-  });
-
-  // Check for subject constraints
-  timetable.slots.forEach((slot) => {
-    if (slot.subject_id) {
-      const subject = subjects.find(s => s.id === slot.subject_id);
-      if (subject && subject.constraints && subject.constraints[slot.day]) {
-        const constraint = subject.constraints[slot.day];
-        if (constraint) {
-          const { start, end } = constraint;
+        const teacher = teachers.find((t) => t.id === subject.teacherId);
+        if (teacher && teacher.constraints[slot.day]) {
+          const { start, end } = teacher.constraints[slot.day]!;
           if (slot.period < start || slot.period > end) {
-            fitness -= 10; // Penalize violating subject constraints
+            fitness -= 10; // Penalize violating teacher constraints
           }
         }
       }
@@ -188,8 +182,7 @@ return fitness;
 
 function crossover(parent1: Timetable, parent2: Timetable): Timetable {
   const child: Timetable = {
-    class_id: parent1.class_id,
-    user_id: parent1.user_id,
+    classId: parent1.classId,
     slots: [],
   };
 
@@ -205,16 +198,22 @@ function crossover(parent1: Timetable, parent2: Timetable): Timetable {
 
 function mutate(timetable: Timetable, classes: Class[], mutationRate: number): Timetable {
   const mutatedTimetable: Timetable = {
-    class_id: timetable.class_id,
-    user_id: timetable.user_id,
+    classId: timetable.classId,
     slots: timetable.slots.map((slot) => ({ ...slot })),
   };
 
   mutatedTimetable.slots.forEach((slot, index) => {
+    if (slot.isInterval) return;
     if (Math.random() < mutationRate) {
-      const classData = classes.find((c) => c.id === timetable.class_id);
+      const classData = classes.find((c) => c.id === timetable.classId);
       if (classData) {
-        slot.subject_id = classData.subjects[Math.floor(Math.random() * classData.subjects.length)];
+        const adjustedPeriod = slot.period > 5 ? slot.period - 2 : slot.period > 2 ? slot.period - 1 : slot.period;
+        const isLab = Math.random() < 0.2 && (adjustedPeriod === 0 || adjustedPeriod === 2 || adjustedPeriod === 4 || adjustedPeriod === 6);
+        slot.subjectId = isLab ? classData.labs[Math.floor(Math.random() * classData.labs.length)] : classData.subjects[Math.floor(Math.random() * classData.subjects.length)];
+        slot.isLab = isLab;
+        if (isLab && index < mutatedTimetable.slots.length - 1 && !mutatedTimetable.slots[index + 1].isInterval) {
+          mutatedTimetable.slots[index + 1] = { ...slot, period: slot.period + 1 };
+        }
       }
     }
   });
@@ -293,3 +292,4 @@ export function generateTimetables(
 
   return Object.values(bestTimetables);
 }
+

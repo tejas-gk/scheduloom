@@ -12,6 +12,8 @@ interface TimetableViewProps {
   classes: Class[];
   rooms: Room[];
   view: 'student' | 'teacher';
+  onRemoveSlot: (classId: string, day: string, period: number) => void;
+  onEditSlot: (classId: string, day: string, period: number) => void;
 }
 
 export default function TimetableView({
@@ -28,8 +30,16 @@ export default function TimetableView({
     return subject ? subject.name : '';
   };
 
-  const getClassName = (class_id: string) => {
-    const classData = classes.find((c) => c.id === class_id);
+  const getTeacherName = (subjectId: string | null) => {
+    if (!subjectId) return '';
+    const subject = subjects.find((s) => s.id === subjectId);
+    if (!subject) return '';
+    const teacher = teachers.find((t) => t.id === subject.teacherId);
+    return teacher ? teacher.name : '';
+  };
+
+  const getClassName = (classId: string) => {
+    const classData = classes.find((c) => c.id === classId);
     return classData ? classData.name : '';
   };
 
@@ -54,18 +64,18 @@ export default function TimetableView({
   };
 
   // Update getTeacherSchedule to include lab information
-  const getTeacherSchedule = (teacher_id: string) => {
+  const lo = (teacher_id: string) => {
     const schedule: { [key: string]: { className: string; subjectName: string; roomInfo: any; is_lab: boolean }[] } = {};
-    
     DAYS.forEach(day => {
-      schedule[day] = Array(PERIODS_PER_DAY).fill(null);
+      schedule[day] = Array(PERIODS_PER_DAY + 2).fill(null);
     });
-  
+
     timetables.forEach(timetable => {
       const classData = classes.find(c => c.id === timetable.class_id);
       if (!classData) return;
 
       timetable.slots.forEach(slot => {
+
         if (!slot.is_interval && slot.subject_id) {
           const subject = subjects.find(s => s.id === slot.subject_id);
           if (subject && subject.teacher_id === teacher_id) {
@@ -79,7 +89,7 @@ export default function TimetableView({
         }
       });
     });
-  
+
     return schedule;
   };
 
@@ -300,3 +310,4 @@ export default function TimetableView({
     </div>
   );
 }
+

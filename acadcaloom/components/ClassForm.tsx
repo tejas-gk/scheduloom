@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
+
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +16,7 @@ interface ClassFormProps {
   rooms: Room[];
   existingClasses: Class[]; // Add this to check room allocation
 }
+
 
 export default function ClassForm({ onSubmit, subjects, rooms, existingClasses }: ClassFormProps) {
   const { register, handleSubmit, reset, formState: { errors } } = useForm<Omit<Class, 'id'>>();
@@ -57,13 +59,8 @@ export default function ClassForm({ onSubmit, subjects, rooms, existingClasses }
     setLabs([]);
   };
 
-  const addLab = (subject_id: string, duration: number) => {
-    setLabs([...labs, { subject_id, duration }]);
-  };
-
-  const removeSubject = (subject_id: string) => {
-    setSelectedSubjects(selectedSubjects.filter(id => id !== subject_id));
-    setLabs(labs.filter(lab => lab.subject_id !== subject_id));
+  const addLab = (subjectId: string, duration: number) => {
+    setLabs([...labs, { subjectId, duration }]);
   };
 
   return (
@@ -207,3 +204,4 @@ export default function ClassForm({ onSubmit, subjects, rooms, existingClasses }
     </Card>
   );
 }
+

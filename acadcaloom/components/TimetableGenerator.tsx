@@ -4,13 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Subject, Teacher, Class, Timetable, DAYS, PERIODS_PER_DAY } from '../types';
+import { Subject, Teacher, Class, Timetable, Room, DAYS, PERIODS_PER_DAY } from '../types';
 import { generateRandomColor } from '../utils/colorGenerator';
 import { generateTimetables } from '../utils/geneticAlgorithm';
 import { parseExcelFile } from '../utils/excelParser';
 import SubjectForm from './SubjectForm';
 import TeacherForm from './TeacherForm';
 import ClassForm from './ClassForm';
+import RoomForm from './RoomForm';
 import TimetableView from './TimetableView';
 import TimetableEditForm from './TimetableEditForm';
 import { Calendar, User, Users } from 'lucide-react';
@@ -25,6 +26,7 @@ export default function TimetableGenerator({ session, userData, setUserData }: T
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [timetables, setTimetables] = useState<Timetable[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedView, setSelectedView] = useState<'teacher' | 'student'>('student');
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
@@ -42,16 +44,18 @@ export default function TimetableGenerator({ session, userData, setUserData }: T
     
     setLoading(true);
     try {
-      const [loadedSubjects, loadedTeachers, loadedClasses, loadedTimetables] = await Promise.all([
+      const [loadedSubjects, loadedTeachers, loadedClasses, loadedRooms, loadedTimetables] = await Promise.all([
         dataService.getSubjects(),
         dataService.getTeachers(),
         dataService.getClasses(),
+        dataService.getRooms(),
         dataService.getTimetables()
       ]);
       
       setSubjects(loadedSubjects);
       setTeachers(loadedTeachers);
       setClasses(loadedClasses);
+      setRooms(loadedRooms);
       setTimetables(loadedTimetables);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -155,6 +159,30 @@ export default function TimetableGenerator({ session, userData, setUserData }: T
     }
   };
 
+  const addRoom = async (room: Omit<Room, 'id'>) => {
+    try {
+      const newRoom = {
+        ...room,
+        user_id: session?.user?.id
+      };
+      
+      const createdRoom = await dataService.createRoom(newRoom);
+      setRooms(prev => [...prev, createdRoom]);
+      
+      toast({
+        title: "Success",
+        description: "Room added successfully",
+      });
+    } catch (error) {
+      console.error('Error adding room:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add room",
+        variant: "destructive"
+      });
+    }
+  };
+
   const generateTimetablesHandler = async () => {
     try {
       setLoading(true);
@@ -205,7 +233,12 @@ export default function TimetableGenerator({ session, userData, setUserData }: T
       });
   
       // Generate timetables only for classes that don't have one
-      const generatedTimetables = generateTimetables(classesNeedingTimetables, teachers, subjects);
+      const generatedTimetables = generateTimetables(
+        classesNeedingTimetables, 
+        teachers, 
+        subjects,
+        rooms // Add this parameter
+      );
       
       // Validate generated timetables
       if (!generatedTimetables || !Array.isArray(generatedTimetables)) {
@@ -475,11 +508,20 @@ export default function TimetableGenerator({ session, userData, setUserData }: T
           College Timetable Generator
         </h1>
         
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          <SubjectForm onSubmit={addSubject} teachers={teachers} />
-          <TeacherForm onSubmit={addTeacher} />
-          <ClassForm onSubmit={addClass} subjects={subjects} />
-        </div>
+        <div className="space-y-8 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <SubjectForm onSubmit={addSubject} teachers={teachers} />
+            <TeacherForm onSubmit={addTeacher} />
+            <RoomForm onSubmit={addRoom} />
+          </div>
+          
+          <ClassForm 
+            onSubmit={addClass} 
+            subjects={subjects} 
+            rooms={rooms}
+            existingClasses={classes} // Pass existing classes to check room allocation
+          />
+      </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
           <h2 className="text-2xl font-semibold mb-4 text-gray-800">Bulk Upload</h2>
@@ -586,13 +628,14 @@ export default function TimetableGenerator({ session, userData, setUserData }: T
         </div>
       </CardContent>
     </Card>
-      {timetables.length > 0 && (
+    {timetables.length > 0 && (
         <div className="mb-4">
           <TimetableView
             timetables={selectedView === 'student' && selectedClass ? [timetables.find((t) => t.class_id === selectedClass)!] : timetables}
             subjects={subjects}
             teachers={teachers}
             classes={classes}
+            rooms={rooms} 
             view={selectedView}
             onRemoveSlot={removeSlot}
             onEditSlot={editSlot}
@@ -613,6 +656,7 @@ export default function TimetableGenerator({ session, userData, setUserData }: T
           subjects={subjects}
           teachers={teachers}
           classes={classes}
+          rooms={rooms}
           onSave={saveEditedTimetable}
           onCancel={() => setEditingTimetable(null)}
           onDelete={(timetableId) => {

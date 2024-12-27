@@ -4,8 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Timetable, Subject, Teacher, Class, DAYS, PERIODS_PER_DAY } from '../types';
-import { BeakerIcon, XCircleIcon, Trash2Icon, Save, X } from 'lucide-react';
+import { Timetable, Subject, Teacher, Class, Room, DAYS, PERIODS_PER_DAY } from '../types';
+import { BeakerIcon, XCircleIcon, Trash2Icon, Save, X, Building } from 'lucide-react';
 import { dataService } from '@/services/dataService';
 import { toast } from '@/hooks/use-toast';
 
@@ -14,6 +14,7 @@ interface TimetableEditFormProps {
   subjects: Subject[];
   teachers: Teacher[];
   classes: Class[];
+  rooms: Room[];
   onSave: (editedTimetable: Timetable) => void;
   onCancel: () => void;
   onDelete: (timetableId: string) => void;
@@ -24,25 +25,84 @@ export default function TimetableEditForm({
   subjects, 
   teachers, 
   classes,
+  rooms,
   onSave, 
   onCancel,
   onDelete 
 }: TimetableEditFormProps) {
   const [editedTimetable, setEditedTimetable] = useState<Timetable>(timetable);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [currentClass, setCurrentClass] = useState<Class | null>(null);
+  const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
 
   useEffect(() => {
-    setEditedTimetable(timetable);
-  }, [timetable]);
+    // Ensure we're working with the correct is_lab property format
+    const normalizedSlots = timetable.slots.map(slot => ({
+      ...slot,
+      is_lab: Boolean(slot.is_lab), // Ensure boolean type
+    }));
+
+    setEditedTimetable({
+      ...timetable,
+      slots: normalizedSlots
+    });
+
+    const classData = classes.find(c => c.id === timetable.class_id);
+    setCurrentClass(classData || null);
+
+    const otherClassRooms = classes
+      .filter(c => c.id !== timetable.class_id)
+      .map(c => c.room_id);
+    
+    const availableRooms = rooms.filter(room => 
+      !otherClassRooms.includes(room.id) || 
+      currentClass?.room_id === room.id
+    );
+    setAvailableRooms(availableRooms);
+  }, [timetable, classes, rooms]);
 
   const handleSlotChange = (day: string, period: number, subject_id: string | null, is_lab: boolean) => {
     const updatedSlots = editedTimetable.slots.map(slot => {
       if (slot.day === day && slot.period === period) {
-        return { ...slot, subject_id, is_lab };
+        return { 
+          ...slot, 
+          subject_id, 
+          is_lab // Ensure is_lab is included in the update
+        };
       }
       return slot;
     });
     setEditedTimetable({ ...editedTimetable, slots: updatedSlots });
+  };
+
+  const handleRoomChange = async (roomId: string) => {
+    try {
+      if (!currentClass) return;
+
+      // Update the class with the new room
+      await dataService.updateClass(currentClass.id, {
+        ...currentClass,
+        room_id: roomId
+      });
+
+      toast({
+        title: "Success",
+        description: "Room updated successfully",
+      });
+
+      // Update local state
+      setCurrentClass({
+        ...currentClass,
+        room_id: roomId
+      });
+    } catch (error) {
+      console.error('Error updating room:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update room",
+        variant: "destructive"
+      });
+    }
   };
 
   const getSlot = (day: string, period: number) => {
@@ -56,15 +116,27 @@ export default function TimetableEditForm({
   const handleSave = async () => {
     try {
       if (editedTimetable.id) {
-        await dataService.updateTimetable(editedTimetable.id, editedTimetable);
+        // Ensure all slots have the correct is_lab property before saving
+        const normalizedSlots = editedTimetable.slots.map(slot => ({
+          ...slot,
+          is_lab: Boolean(slot.is_lab),
+          is_interval: Boolean(slot.is_interval)
+        }));
+
+        const updatedTimetable = {
+          ...editedTimetable,
+          slots: normalizedSlots
+        };
+
+        await dataService.updateTimetable(editedTimetable.id, updatedTimetable);
+        onSave(updatedTimetable);
+        toast({
+          title: "Success",
+          description: "Timetable updated successfully",
+        });
       } else {
         throw new Error('Timetable ID is undefined');
       }
-      onSave(editedTimetable);
-      toast({
-        title: "Success",
-        description: "Timetable updated successfully",
-      });
     } catch (error) {
       console.error('Error saving timetable:', error);
       toast({
@@ -78,13 +150,11 @@ export default function TimetableEditForm({
   const handleDelete = async () => {
     try {
       setIsDeleting(true);
-      // Delete the timetable
       if (editedTimetable.id) {
         await dataService.deleteTimetable(editedTimetable.id);
       } else {
         throw new Error('Timetable ID is undefined');
       }
-      // Delete the associated class
       await dataService.deleteClass(editedTimetable.class_id);
       
       onDelete(editedTimetable.id);
@@ -105,41 +175,67 @@ export default function TimetableEditForm({
     }
   };
 
-  const isInterval = (period: number) => {
-    return period === 2 || period === 4;
+  const getCurrentRoom = () => {
+    if (!currentClass) return null;
+    return rooms.find(room => room.id === currentClass.room_id);
   };
 
   return (
     <Card className="w-full bg-white shadow-lg rounded-lg overflow-hidden">
-      <CardHeader className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 flex flex-row justify-between">
-        <CardTitle className="text-2xl items-center font-bold">
-          Edit Timetable - {classes.find(c => c.id === editedTimetable.class_id)?.name}
-        </CardTitle>
-        <div className="flex justify-end">
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button 
-                variant="destructive" 
-                className="flex items-center gap-2"
-                disabled={isDeleting}
-              >
-                <Trash2Icon size={16} />
-                {isDeleting ? 'Deleting...' : 'Delete Timetable'}
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently delete both the timetable and its associated class. This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+      <CardHeader className="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6">
+        <div className="flex justify-between items-center">
+          <CardTitle className="text-2xl font-bold">
+            Edit Timetable - {classes.find(c => c.id === editedTimetable.class_id)?.name}
+          </CardTitle>
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <Select onValueChange={handleRoomChange} value={currentClass?.room_id || ''}>
+                <SelectTrigger className="bg-white text-gray-900 border-0">
+                  <div className="flex items-center gap-2">
+                    <Building className="h-4 w-4" />
+                    {getCurrentRoom()?.name || "Select Room"}
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  {availableRooms.map((room) => (
+                    <SelectItem key={room.id} value={room.id}>
+                      <div className="flex items-center gap-2">
+                        <Building className="h-4 w-4" />
+                        {room.name} - {room.building} (Floor {room.floor})
+                        <span className="text-sm text-gray-500">
+                          ({room.type}, Capacity: {room.capacity})
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button 
+                  variant="destructive" 
+                  className="flex items-center gap-2"
+                  disabled={isDeleting}
+                >
+                  <Trash2Icon size={16} />
+                  {isDeleting ? 'Deleting...' : 'Delete Timetable'}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete both the timetable and its associated class. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-6">

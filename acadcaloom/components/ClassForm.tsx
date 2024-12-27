@@ -5,22 +5,28 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Book, Beaker, X, GraduationCap } from 'lucide-react';
-import { Class, Subject } from '../types';
+import { Book, Beaker, X, GraduationCap, Building } from 'lucide-react';
+import { Class, Subject, Room } from '../types';
 import { toast } from '@/hooks/use-toast';
 
 interface ClassFormProps {
   onSubmit: (classData: Omit<Class, 'id'>) => void;
   subjects: Subject[];
+  rooms: Room[];
+  existingClasses: Class[]; // Add this to check room allocation
 }
 
-export default function ClassForm({ onSubmit, subjects }: ClassFormProps) {
+export default function ClassForm({ onSubmit, subjects, rooms, existingClasses }: ClassFormProps) {
   const { register, handleSubmit, reset, formState: { errors } } = useForm<Omit<Class, 'id'>>();
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+  const [selectedRoom, setSelectedRoom] = useState<string>('');
   const [labs, setLabs] = useState<{ subject_id: string; duration: number }[]>([]);
 
+  const availableRooms = rooms.filter(room => 
+    !existingClasses.some(cls => cls.room_id === room.id)
+  );
+
   const onSubmitForm = (data: Omit<Class, 'id'>) => {
-    // Validate that at least one subject is selected
     if (selectedSubjects.length === 0) {
       toast({
         title: "Error",
@@ -30,9 +36,24 @@ export default function ClassForm({ onSubmit, subjects }: ClassFormProps) {
       return;
     }
 
-    onSubmit({ ...data, subjects: selectedSubjects, labs });
+    if (!selectedRoom) {
+      toast({
+        title: "Error",
+        description: "Please select a room for the class",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    onSubmit({ 
+      ...data, 
+      subjects: selectedSubjects, 
+      labs,
+      room_id: selectedRoom 
+    });
     reset();
     setSelectedSubjects([]);
+    setSelectedRoom('');
     setLabs([]);
   };
 
@@ -46,7 +67,7 @@ export default function ClassForm({ onSubmit, subjects }: ClassFormProps) {
   };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto bg-gradient-to-br from-white to-gray-50 shadow-xl border-t-4 border-t-purple-500">
+    <Card className="w-full bg-white shadow-xl border-t-4 border-t-purple-500">
       <CardHeader className="border-b border-gray-100 bg-white/50">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-purple-100">
@@ -58,100 +79,129 @@ export default function ClassForm({ onSubmit, subjects }: ClassFormProps) {
         </div>
       </CardHeader>
       
-      <CardContent className="pt-8">
-        <form onSubmit={handleSubmit(onSubmitForm)} className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="className" className="text-sm font-semibold text-gray-700">
-              Class Name
-            </Label>
-            <Input
-              id="className"
-              className="w-full border-gray-200 focus:border-purple-500 focus:ring-purple-500 transition-colors"
-              placeholder="Enter class name"
-              {...register('name', { required: true })}
-            />
-          </div>
+      <CardContent className="pt-6">
+        <form onSubmit={handleSubmit(onSubmitForm)}>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Class Name Input - 2 columns */}
+            <div className="lg:col-span-2">
+              <Label htmlFor="className" className="text-sm font-semibold text-gray-700">
+                Class Name
+              </Label>
+              <Input
+                id="className"
+                className="mt-1 border-gray-200 focus:border-purple-500 focus:ring-purple-500"
+                placeholder="Enter class name"
+                {...register('name', { required: true })}
+              />
+            </div>
 
-          <div className="space-y-4">
-            <Label className="text-sm font-semibold text-gray-700">Subjects</Label>
-            <Select
-              onValueChange={(value) => {
-                if (!selectedSubjects.includes(value)) {
-                  setSelectedSubjects([...selectedSubjects, value]);
-                }
-              }}
-            >
-              <SelectTrigger className="w-full border-gray-200 focus:border-purple-500">
-                <SelectValue placeholder="Select subjects to add" />
-              </SelectTrigger>
-              <SelectContent>
-                {subjects
-                  .filter(subject => !selectedSubjects.includes(subject.id))
-                  .map((subject) => (
-                    <SelectItem key={subject.id} value={subject.id}>
-                      {subject.name}
+            {/* Room Selection - 3 columns */}
+            {/* Updated Room Selection with availability check */}
+            <div className="lg:col-span-3">
+              <Label className="text-sm font-semibold text-gray-700">Assigned Room</Label>
+              <Select onValueChange={setSelectedRoom} value={selectedRoom}>
+                <SelectTrigger className="mt-1 border-gray-200 focus:border-purple-500">
+                  <SelectValue placeholder={availableRooms.length === 0 ? "No rooms available" : "Select a room"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableRooms.map((room) => (
+                    <SelectItem key={room.id} value={room.id}>
+                      <div className="flex items-center gap-2">
+                        <Building className="h-4 w-4 text-purple-600" />
+                        {room.name} - {room.building} (Floor {room.floor})
+                        {room.type === 'lab' && <Beaker className="h-4 w-4 text-purple-600" />}
+                      </div>
                     </SelectItem>
                   ))}
-              </SelectContent>
-            </Select>
+                </SelectContent>
+              </Select>
+              {availableRooms.length === 0 && (
+                <p className="text-sm text-red-500 mt-1">
+                  All rooms are currently allocated. Please add more rooms or free up existing ones.
+                </p>
+              )}
+            </div>
 
-            <div className="space-y-3">
-              {selectedSubjects.map((subject_id) => {
-                const subject = subjects.find((s) => s.id === subject_id);
-                const hasLab = labs.some(lab => lab.subject_id === subject_id);
-                
-                return (
-                  <div key={subject_id} className="p-4 rounded-xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center justify-between">
+            {/* Subject Selection - 4 columns */}
+            <div className="lg:col-span-4">
+              <Label className="text-sm font-semibold text-gray-700">Add Subjects</Label>
+              <Select
+                onValueChange={(value) => {
+                  if (!selectedSubjects.includes(value)) {
+                    setSelectedSubjects([...selectedSubjects, value]);
+                  }
+                }}
+              >
+                <SelectTrigger className="mt-1 border-gray-200 focus:border-purple-500">
+                  <SelectValue placeholder="Select subjects to add" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjects
+                    .filter(subject => !selectedSubjects.includes(subject.id))
+                    .map((subject) => (
+                      <SelectItem key={subject.id} value={subject.id}>
+                        {subject.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Selected Subjects Display - 3 columns */}
+            <div className="lg:col-span-3">
+              <Label className="text-sm font-semibold text-gray-700 mb-1 block">Selected Subjects</Label>
+              <div className="space-y-2 max-h-24 overflow-y-auto">
+                {selectedSubjects.map((subject_id) => {
+                  const subject = subjects.find((s) => s.id === subject_id);
+                  const hasLab = labs.some(lab => lab.subject_id === subject_id);
+                  
+                  return (
+                    <div key={subject_id} className="flex items-center justify-between p-2 rounded-lg bg-purple-50 border border-purple-100">
                       <div className="flex items-center gap-2">
                         <Book className="h-4 w-4 text-purple-600" />
-                        <span className="font-medium text-gray-700">{subject?.name}</span>
+                        <span className="text-sm font-medium text-purple-700">{subject?.name}</span>
+                        {hasLab && <Beaker className="h-4 w-4 text-purple-600" />}
                       </div>
                       <div className="flex items-center gap-2">
                         {!hasLab && (
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
                             onClick={() => addLab(subject_id, 2)}
-                            className="h-8 border-purple-200 text-purple-700 hover:bg-purple-50"
+                            className="h-6 px-2 text-purple-600 hover:bg-purple-100"
                           >
-                            <Beaker className="h-4 w-4 mr-2" />
-                            Add Lab
+                            <Beaker className="h-4 w-4" />
                           </Button>
                         )}
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon"
+                          size="sm"
                           onClick={() => removeSubject(subject_id)}
-                          className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                          className="h-6 w-6 text-gray-400 hover:text-red-500 hover:bg-red-50"
                         >
                           <X className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
-                    {hasLab && (
-                      <div className="mt-2 pl-6 flex items-center gap-2 text-sm text-purple-600 bg-purple-50 p-2 rounded-lg">
-                        <Beaker className="h-4 w-4" />
-                        <span>Lab Session Added (2 periods)</span>
-                      </div>
-                    )}
+                  );
+                })}
+                {selectedSubjects.length === 0 && (
+                  <div className="text-sm text-gray-400 p-2 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+                    No subjects selected
                   </div>
-                );
-              })}
-            </div>
-
-            {selectedSubjects.length === 0 && (
-              <div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
-                No subjects added yet
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          <Button type="submit" className="w-full bg-purple-600 hover:bg-purple-700">
-            Create Class
-          </Button>
+          {/* Submit Button */}
+          <div className="mt-6">
+            <Button type="submit" className="bg-purple-600 hover:bg-purple-700">
+              Create Class
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>

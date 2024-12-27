@@ -1,30 +1,53 @@
-import { Subject, Teacher, Class, Timetable, TimeSlot, DAYS, PERIODS_PER_DAY } from '../types';
+import { Subject, Teacher, Class, Timetable, TimeSlot, DAYS, PERIODS_PER_DAY, Room } from '../types';
 
-function generateInitialPopulation(classes: Class[], populationSize: number): Timetable[] {
+function generateInitialPopulation(
+  classes: Class[], 
+  rooms: Room[],
+  populationSize: number
+): Timetable[] {
   const population: Timetable[] = [];
 
   for (let i = 0; i < populationSize; i++) {
-    const timetables = classes.map((cls) => ({
-      class_id: cls.id,
-      user_id: '', // Will be set in TimetableGenerator
-      slots: DAYS.flatMap((day) =>
-        Array.from({ length: PERIODS_PER_DAY }, (_, period) => ({
-          day,
-          period,
-          subject_id: cls.subjects[Math.floor(Math.random() * cls.subjects.length)],
-          is_lab: false,
-          is_interval: false
-        }))
-      ),
-    }));
-
-    population.push(...timetables);
+    // Generate one timetable for each class
+    classes.forEach((cls) => {
+      const timetable: Timetable = {
+        class_id: cls.id,
+        user_id: '',
+        slots: DAYS.flatMap((day) =>
+          Array.from({ length: PERIODS_PER_DAY }, (_, period) => {
+            const availableRooms = rooms.filter(room => {
+              if (room.availability && room.availability[day]) {
+                const { start, end } = room.availability[day]!;
+                return period >= start && period <= end;
+              }
+              return true;
+            });
+            
+            return {
+              day,
+              period,
+              subject_id: cls.subjects[Math.floor(Math.random() * cls.subjects.length)],
+              room_id: availableRooms[Math.floor(Math.random() * availableRooms.length)]?.id || null,
+              is_lab: false,
+              is_interval: false
+            };
+          })
+        ),
+      };
+      population.push(timetable);
+    });
   }
 
   return population;
 }
 
-function calculateFitness(timetable: Timetable, classes: Class[], teachers: Teacher[], subjects: Subject[]): number {
+function calculateFitness(
+  timetable: Timetable, 
+  classes: Class[], 
+  teachers: Teacher[], 
+  subjects: Subject[],
+  rooms: Room[]
+): number {
   let fitness = 0;
 
   // Check for teacher conflicts
@@ -116,8 +139,51 @@ function calculateFitness(timetable: Timetable, classes: Class[], teachers: Teac
       }
     });
   }
+  // Check for room conflicts
+  const roomSlots: { [room_id: string]: Set<string> } = {};
+  timetable.slots.forEach((slot) => {
+    if (slot.room_id) {
+      if (!roomSlots[slot.room_id]) {
+        roomSlots[slot.room_id] = new Set();
+      }
+      const slotKey = `${slot.day}-${slot.period}`;
+      if (roomSlots[slot.room_id].has(slotKey)) {
+        fitness -= 15; // Heavy penalty for room conflicts
+      } else {
+        roomSlots[slot.room_id].add(slotKey);
+      }
+    }
+  });
 
-  return fitness;
+  // Check room type compatibility with subject
+  timetable.slots.forEach((slot) => {
+    if (slot.subject_id && slot.room_id) {
+      const subject = subjects.find(s => s.id === slot.subject_id);
+      const room = rooms.find(r => r.id === slot.room_id);
+      
+      if (subject && room) {
+        // Penalize if lab subject is not in lab room
+        if (slot.is_lab && room.type !== 'lab') {
+          fitness -= 10;
+        }
+      }
+    }
+  });
+
+  // Check room availability constraints
+  timetable.slots.forEach((slot) => {
+    if (slot.room_id) {
+      const room = rooms.find(r => r.id === slot.room_id);
+      if (room?.availability && room.availability[slot.day]) {
+        const { start, end } = room.availability[slot.day]!;
+        if (slot.period < start || slot.period > end) {
+          fitness -= 8; // Penalize violating room availability
+        }
+      }
+    }
+  });
+
+return fitness;
 }
 
 function crossover(parent1: Timetable, parent2: Timetable): Timetable {
@@ -160,35 +226,47 @@ export function generateTimetables(
   classes: Class[],
   teachers: Teacher[],
   subjects: Subject[],
+  rooms: Room[],
   populationSize: number = 100,
   generations: number = 100,
   mutationRate: number = 0.01
 ): Timetable[] {
   // Input validation
-  if (!classes?.length || !teachers?.length || !subjects?.length) {
+  if (!classes?.length || !teachers?.length || !subjects?.length || !rooms?.length) {
     throw new Error('Missing required input data');
   }
 
-  let population = generateInitialPopulation(classes, populationSize);
+  let population = generateInitialPopulation(classes, rooms, populationSize);
 
   for (let gen = 0; gen < generations; gen++) {
+    // Calculate fitness for each timetable
     const fitnessScores = population.map((timetable) => ({
       timetable,
-      fitness: calculateFitness(timetable, classes, teachers, subjects),
+      fitness: calculateFitness(timetable, classes, teachers, subjects, rooms)
     }));
 
+    // Sort by fitness in descending order
     fitnessScores.sort((a, b) => b.fitness - a.fitness);
 
     const newPopulation: Timetable[] = [];
 
-    // Elitism: Keep the best 10% of the population
-    const eliteCount = Math.floor(populationSize * 0.1);
-    newPopulation.push(...fitnessScores.slice(0, eliteCount).map((item) => item.timetable));
+    // Elitism: Keep the best timetables for each class
+    classes.forEach((cls) => {
+      const bestForClass = fitnessScores
+        .filter(item => item.timetable.class_id === cls.id)
+        .slice(0, Math.max(1, Math.floor(populationSize * 0.1 / classes.length)));
+      
+      newPopulation.push(...bestForClass.map(item => item.timetable));
+    });
 
     // Generate the rest of the population through crossover and mutation
-    while (newPopulation.length < populationSize) {
-      const parent1 = fitnessScores[Math.floor(Math.random() * fitnessScores.length)].timetable;
-      const parent2 = fitnessScores[Math.floor(Math.random() * fitnessScores.length)].timetable;
+    while (newPopulation.length < populationSize * classes.length) {
+      // Select parents from the same class
+      const targetClass = classes[Math.floor(newPopulation.length / populationSize) % classes.length];
+      const classScores = fitnessScores.filter(item => item.timetable.class_id === targetClass.id);
+      
+      const parent1 = classScores[Math.floor(Math.random() * classScores.length)].timetable;
+      const parent2 = classScores[Math.floor(Math.random() * classScores.length)].timetable;
 
       let child = crossover(parent1, parent2);
       child = mutate(child, classes, mutationRate);
@@ -201,12 +279,16 @@ export function generateTimetables(
 
   // Return the best timetable for each class
   const bestTimetables: { [class_id: string]: Timetable } = {};
-  population.forEach((timetable) => {
-    if (!bestTimetables[timetable.class_id] || 
-        calculateFitness(timetable, classes, teachers, subjects) > 
-        calculateFitness(bestTimetables[timetable.class_id], classes, teachers, subjects)) {
-      bestTimetables[timetable.class_id] = timetable;
-    }
+  
+  classes.forEach((cls) => {
+    const classTimetables = population.filter(t => t.class_id === cls.id);
+    const bestTimetable = classTimetables.reduce((best, current) => {
+      const currentFitness = calculateFitness(current, classes, teachers, subjects, rooms);
+      const bestFitness = calculateFitness(best, classes, teachers, subjects, rooms);
+      return currentFitness > bestFitness ? current : best;
+    }, classTimetables[0]);
+    
+    bestTimetables[cls.id] = bestTimetable;
   });
 
   return Object.values(bestTimetables);

@@ -127,7 +127,7 @@ const HomePage: React.FC<HomePageProps> = ({ onAuth }) => {
               className="bg-white/50 backdrop-blur-sm hover:bg-white/80 text-gray-900 px-8 py-6 text-lg rounded-full shadow-lg hover:shadow-xl transition-all duration-200 group"
               asChild
             >
-              <a href="https://youtu.be/gcFn0IH-gsg" target="_blank" rel="noopener noreferrer">
+              <a href="https://youtu.be/St3xVlFTN7o" target="_blank" rel="noopener noreferrer">
                 Watch Demo
                 <Play className="ml-2 w-5 h-5 group-hover:scale-110 transition-transform" />
               </a>

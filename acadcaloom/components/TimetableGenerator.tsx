@@ -1,10 +1,10 @@
-import React, { useState, useRef } from 'react';
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Subject, Teacher, Class, Timetable, DAYS, PERIODS_PER_DAY } from '../types';
+'use client'
+import React, { useState, useRef, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Subject, Teacher, Class, Timetable, Room, DAYS, PERIODS_PER_DAY } from '../types';
 import { generateRandomColor } from '../utils/colorGenerator';
 import { generateTimetables } from '../utils/geneticAlgorithm';
 import { parseExcelFile } from '../utils/excelParser';
@@ -13,6 +13,7 @@ import { downloadTimetableAsPng } from '@/utils/downloadTimetableAsPng';
 import SubjectForm from './SubjectForm';
 import TeacherForm from './TeacherForm';
 import ClassForm from './ClassForm';
+import RoomForm from './RoomForm';
 import TimetableView from './TimetableView';
 import TimetableEditForm from './TimetableEditForm';
 
@@ -21,6 +22,10 @@ export default function TimetableGenerator() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [timetables, setTimetables] = useState<Timetable[]>([]);
+
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(false);
+
   const [selectedView, setSelectedView] = useState<'teacher' | 'student'>('student');
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [bulkUploadData, setBulkUploadData] = useState('');
@@ -28,13 +33,64 @@ export default function TimetableGenerator() {
   const [editingSlot, setEditingSlot] = useState<{ classId: string; day: string; period: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const addSubject = (subject: Omit<Subject, 'id' | 'color'>) => {
-    const newSubject: Subject = {
-      ...subject,
-      id: `subject_${subjects.length + 1}`,
-      color: generateRandomColor(),
-    };
-    setSubjects([...subjects, newSubject]);
+  useEffect(() => {
+    loadInitialData();
+  }, [session?.user?.id]);
+
+  const loadInitialData = async () => {
+    if (!session?.user?.id) return;
+    
+    setLoading(true);
+    try {
+      const [loadedSubjects, loadedTeachers, loadedClasses, loadedRooms, loadedTimetables] = await Promise.all([
+        dataService.getSubjects(),
+        dataService.getTeachers(),
+        dataService.getClasses(),
+        dataService.getRooms(),
+        dataService.getTimetables()
+      ]);
+      
+      setSubjects(loadedSubjects);
+      setTeachers(loadedTeachers);
+      setClasses(loadedClasses);
+      setRooms(loadedRooms);
+      setTimetables(loadedTimetables);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load data. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const addSubject = async (subject: Omit<Subject, 'id' | 'color'>) => {
+    try {
+      const newSubject = {
+        ...subject,
+        teacher_id: subject.teacher_id, // Use snake_case to match database
+        color: generateRandomColor(),
+        user_id: session?.user?.id
+      };
+      
+      const createdSubject = await dataService.createSubject(newSubject);
+      setSubjects(prev => [...prev, createdSubject]);
+      
+      toast({
+        title: "Success",
+        description: "Subject added successfully",
+      });
+    } catch (error) {
+      console.error('Error adding subject:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add subject",
+        variant: "destructive"
+      });
+    }
   };
 
   const addTeacher = (teacher: Omit<Teacher, 'id'>) => {
@@ -53,9 +109,168 @@ export default function TimetableGenerator() {
     setClasses([...classes, newClass]);
   };
 
-  const generateTimetablesHandler = () => {
-    const generatedTimetables = generateTimetables(classes, teachers, subjects);
-    setTimetables(generatedTimetables);
+  const addRoom = async (room: Omit<Room, 'id'>) => {
+    try {
+      const newRoom = {
+        ...room,
+        user_id: session?.user?.id
+      };
+      
+      const createdRoom = await dataService.createRoom(newRoom);
+      setRooms(prev => [...prev, createdRoom]);
+      
+      toast({
+        title: "Success",
+        description: "Room added successfully",
+      });
+    } catch (error) {
+      console.error('Error adding room:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add room",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const generateTimetablesHandler = async () => {
+    try {
+      setLoading(true);
+      
+      // Validate required data exists
+      if (!classes || classes.length === 0) {
+        throw new Error("No classes found. Please add at least one class before generating timetables.");
+      }
+      
+      if (!teachers || teachers.length === 0) {
+        throw new Error("No teachers found. Please add at least one teacher before generating timetables.");
+      }
+      
+      if (!subjects || subjects.length === 0) {
+        throw new Error("No subjects found. Please add at least one subject before generating timetables.");
+      }
+  
+      // Get existing timetables for validation
+      const existingTimetables = await dataService.getTimetables();
+      const classesWithTimetables = new Set(existingTimetables.map(t => t.class_id));
+  
+      // Filter out classes that already have timetables
+      const classesNeedingTimetables = classes.filter(cls => !classesWithTimetables.has(cls.id));
+  
+      if (classesNeedingTimetables.length === 0) {
+        throw new Error("All classes already have timetables. Delete existing timetables first if you want to regenerate them.");
+      }
+  
+      // Validate relationships between data
+      for (const cls of classesNeedingTimetables) {
+        if (!cls.subjects || cls.subjects.length === 0) {
+          throw new Error(`Class ${cls.name} has no subjects assigned.`);
+        }
+        
+        // Verify all subjects in class exist
+        cls.subjects.forEach(subjectId => {
+          if (!subjects.find(s => s.id === subjectId)) {
+            throw new Error(`Invalid subject reference in class ${cls.name}`);
+          }
+        });
+      }
+  
+      // Verify each subject has a teacher
+      subjects.forEach(subject => {
+        if (!subject.teacher_id || !teachers.find(t => t.id === subject.teacher_id)) {
+          throw new Error(`Subject ${subject.name} has no valid teacher assigned.`);
+        }
+      });
+  
+      // Generate timetables only for classes that don't have one
+      const generatedTimetables = generateTimetables(
+        classesNeedingTimetables, 
+        teachers, 
+        subjects,
+        rooms // Add this parameter
+      );
+      
+      // Validate generated timetables
+      if (!generatedTimetables || !Array.isArray(generatedTimetables)) {
+        throw new Error("Failed to generate valid timetables structure");
+      }
+  
+      // Validate each generated timetable
+      generatedTimetables.forEach((timetable, index) => {
+        if (!timetable || !timetable.class_id || !timetable.slots) {
+          throw new Error(`Invalid timetable generated at index ${index}`);
+        }
+      });
+  
+      // Adjust the generated timetables to match database schema
+      const adjustedTimetables = generatedTimetables.map(timetable => ({
+        class_id: timetable.class_id,
+        user_id: session?.user?.id,
+        slots: DAYS.flatMap(day =>
+          Array.from({ length: PERIODS_PER_DAY + 2 }, (_, period) => {
+            if (period === 2 || period === 4) {
+              return {
+                day,
+                period,
+                subject_id: null,
+                is_lab: false,
+                is_interval: true
+              };
+            }
+            const adjustedPeriod = period < 2 ? period : period < 4 ? period - 1 : period - 2;
+            const slot = timetable.slots.find(s => s.day === day && s.period === adjustedPeriod);
+            return slot
+              ? {
+                  day,
+                  period,
+                  subject_id: slot.subject_id,
+                  is_lab: slot.is_lab,
+                  is_interval: false
+                }
+              : {
+                  day,
+                  period,
+                  subject_id: null,
+                  is_lab: false,
+                  is_interval: false
+                };
+          })
+        ),
+      }));
+  
+      // Save the generated timetables to the database
+      const savedTimetables = await Promise.all(
+        adjustedTimetables.map(timetable => dataService.createTimetable(timetable))
+      );
+  
+      // Format timetables for frontend
+      const formattedTimetables = savedTimetables.map(timetable => ({
+        ...timetable,
+        slots: timetable.slots.map(slot => ({
+          ...slot,
+          isLab: slot.is_lab,
+          isInterval: slot.is_interval
+        }))
+      }));
+  
+      // Merge with existing timetables for display
+      setTimetables(prevTimetables => [...prevTimetables, ...formattedTimetables]);
+      
+      toast({
+        title: "Success",
+        description: `Generated timetables for ${formattedTimetables.length} classes successfully`,
+      });
+  
+    } catch (error) {
+      console.error('Error generating timetables:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to generate timetables",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleBulkUpload = () => {
@@ -200,15 +415,28 @@ export default function TimetableGenerator() {
     }
   };
 
-  const handleDownloadPng = () => {
-    if (selectedClass) {
-      const selectedTimetable = timetables.find(t => t.classId === selectedClass);
-      if (selectedTimetable) {
-        const className = classes.find(c => c.id === selectedClass)?.name || 'Unknown';
-        downloadTimetableAsPng(`timetable-${selectedTimetable.classId}`, className);
-      }
-    }
-  };
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8">
+      <div className="container mx-auto px-4 max-w-7xl">
+        <h1 className="text-4xl font-bold text-gray-800 mb-8 text-center bg-gradient-to-r from-purple-600 via-blue-600 to-emerald-600 bg-clip-text text-transparent">
+          College Timetable Generator
+        </h1>
+        
+        <div className="space-y-8 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <SubjectForm onSubmit={addSubject} teachers={teachers} />
+            <TeacherForm onSubmit={addTeacher} />
+            <RoomForm onSubmit={addRoom} />
+          </div>
+          
+          <ClassForm 
+            onSubmit={addClass} 
+            subjects={subjects} 
+            rooms={rooms}
+            existingClasses={classes} // Pass existing classes to check room allocation
+          />
+      </div>
+
 
   return (
     <div className="container mx-auto p-4">
@@ -269,8 +497,9 @@ export default function TimetableGenerator() {
             </SelectContent>
           </Select>
         </div>
-      )}
-      {timetables.length > 0 && (
+      </CardContent>
+    </Card>
+    {timetables.length > 0 && (
         <div className="mb-4">
           <TimetableView
             timetables={selectedView === 'student' && selectedClass
@@ -279,6 +508,7 @@ export default function TimetableGenerator() {
             subjects={subjects}
             teachers={teachers}
             classes={classes}
+            rooms={rooms} 
             view={selectedView}
             onRemoveSlot={removeSlot}
             onEditSlot={editSlot}
@@ -299,6 +529,9 @@ export default function TimetableGenerator() {
         <TimetableEditForm
           timetable={editingTimetable}
           subjects={subjects}
+          teachers={teachers}
+          classes={classes}
+          rooms={rooms}
           onSave={saveEditedTimetable}
           onCancel={() => setEditingTimetable(null)}
         />

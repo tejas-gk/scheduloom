@@ -1,6 +1,6 @@
 // services/dataService.ts
 import { supabase } from '@/utils/supabaseClient';
-import { Subject, Teacher, Class, Timetable } from '../types';
+import { Subject, Teacher, Class, Timetable, Room } from '../types';
 
 export const dataService = {
   // Subjects
@@ -101,10 +101,17 @@ export const dataService = {
   },
 
   async createClass(classData: Omit<Class, 'id'>) {
-    console.log('Creating class with data:', classData); // Debug log
+    // Check if the room is already allocated
+    const { data: existingClasses } = await supabase
+      .from('classes')
+      .select('room_id');
     
-    if (!classData.name || !classData.subjects) {
-      throw new Error('Missing required class data');
+    const roomAlreadyAllocated = existingClasses?.some(
+      cls => cls.room_id === classData.room_id
+    );
+
+    if (roomAlreadyAllocated) {
+      throw new Error('Selected room is already allocated to another class');
     }
 
     const { data, error } = await supabase
@@ -113,13 +120,14 @@ export const dataService = {
         name: classData.name,
         subjects: classData.subjects,
         labs: classData.labs || [],
+        room_id: classData.room_id,
         user_id: classData.user_id
       }])
       .select()
       .single();
     
     if (error) {
-      console.error('Supabase error:', error); // Debug log
+      console.error('Supabase error:', error);
       throw error;
     }
     
@@ -188,5 +196,47 @@ export const dataService = {
       .eq('id', id);
     
     if (error) throw error;
-  }
+  },
+
+  async getRooms() {
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('*')
+      .order('created_at', { ascending: true });
+    
+    if (error) throw error;
+    return data;
+  },
+
+  async createRoom(room: Omit<Room, 'id'>) {
+    const { data, error } = await supabase
+      .from('rooms')
+      .insert([{ ...room }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  async updateRoom(id: string, updates: Partial<Room>) {
+    const { data, error } = await supabase
+      .from('rooms')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  async deleteRoom(id: string) {
+    const { error } = await supabase
+      .from('rooms')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+  },
 };
